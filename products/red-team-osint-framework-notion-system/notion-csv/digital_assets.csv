@@ -1,0 +1,4 @@
+Asset Name,Asset Type,Related Target,Discovery Source,Confidence,Last Verified,Notes
+portal.acme.example,Domain,Acme Corp,Certificate Transparency,High,2026-01-10,Public web portal
+api.brightbank.example,Subdomain,BrightBank,Developer Docs,Medium,2026-01-08,Potential API gateway
+status.novahealth.example,Subdomain,Nova Health,Search Engine Cache,Medium,2026-01-07,Status and incident comms surface

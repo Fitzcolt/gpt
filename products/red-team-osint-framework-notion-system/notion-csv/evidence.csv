@@ -1,0 +1,4 @@
+Evidence ID,Source URL,Collection Date,Attribution Confidence,Linked Target,Linked Persona,Linked Asset,Archive Link,Notes
+EVID-001,https://example.com/acme-careers,2026-01-10,High,Acme Corp,,portal.acme.example,https://web.archive.org/,Public tech stack clues
+EVID-002,https://example.com/brightbank-api-docs,2026-01-08,Medium,BrightBank,,api.brightbank.example,https://web.archive.org/,Public endpoint naming patterns
+EVID-003,https://example.com/nova-status,2026-01-07,Medium,Nova Health,,status.novahealth.example,https://web.archive.org/,Operational exposure metadata
