@@ -1,0 +1,4 @@
+Persona Name,Role,Company,Public Footprint Score,Contact Surface,Risk Notes
+Jane Doe,Engineering Manager,Acme Corp,8,"LinkedIn;GitHub",High public technical footprint
+Mark Lee,IT Administrator,BrightBank,6,"LinkedIn;Corporate Bio",Potential infra ownership indicators
+Sofia Khan,Security Analyst,Nova Health,5,"LinkedIn",Moderate public presence

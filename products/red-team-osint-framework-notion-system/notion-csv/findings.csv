@@ -1,0 +1,4 @@
+Finding Title,Severity,Category,Confidence,Linked Evidence,Recommended Action,Owner,Status
+External service dependency overexposure,Medium,Supply Chain,Medium,EVID-001,Map dependency ownership and hardening controls,Analyst A,Open
+Public API documentation metadata leakage,Medium,Information Exposure,Medium,EVID-002,Reduce environment identifiers in public docs,Analyst B,Open
+Operational metadata leakage via status endpoint,Low,Information Exposure,Medium,EVID-003,Minimize publicly exposed stack/version cues,Analyst C,Triaged

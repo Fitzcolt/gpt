@@ -1,0 +1,4 @@
+Target Name,Organization Type,Priority,Campaign,Sector,Region,Status,Notes
+Acme Corp,Enterprise,High,Q2-External Mapping,Technology,North America,Active,Primary pilot target
+BrightBank,Financial,High,Q2-External Mapping,Finance,Europe,Active,Focus on external auth perimeter
+Nova Health,Healthcare,Medium,Q2-External Mapping,Healthcare,North America,Scoping,Initial source collection in progress
