@@ -121,8 +121,13 @@ class Scope:
             e = raw.strip().lower().rstrip(".")
             if not e:
                 continue
-            if e.startswith("*."):
-                self.wildcards.append(e[1:])  # ".example.com"
+            if e.startswith("*"):
+                # Accept both '*.example.com' and '*example.com'. Normalize to a
+                # '.example.com' suffix that matches the apex and any subdomain.
+                e = e[1:]
+                if not e.startswith("."):
+                    e = "." + e
+                self.wildcards.append(e)
             else:
                 self.exact.add(e)
 
