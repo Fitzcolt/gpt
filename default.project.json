@@ -1,0 +1,23 @@
+{
+  "name": "Tiers",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "TierShared": {
+        "$path": "src/shared"
+      }
+    },
+    "ServerScriptService": {
+      "TierServer": {
+        "$path": "src/server"
+      }
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "TierClient": {
+          "$path": "src/client"
+        }
+      }
+    }
+  }
+}
