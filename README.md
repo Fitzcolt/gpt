@@ -20,9 +20,9 @@ separate, per-finding decision a human makes against an explicitly scoped target
 
 ## Safety model
 
-- **`--authorized` is mandatory.** It is your assertion that you hold written
-  permission to test the targets. Only scan what your engagement's rules of
-  engagement cover.
+- **Authorization is your responsibility.** Only scan what your engagement's
+  rules of engagement cover. `--authorized` is an optional acknowledgment that
+  silences the per-run reminder; it is not a technical gate.
 - **Scope is enforced.** If you pass `--scope`/`--scope-file`, every target must
   fall inside it (typos are rejected). With no explicit scope, the targets you
   name *are* the scope.
@@ -56,7 +56,7 @@ python3 recon_scan.py --authorized https://example.com/
 
 | Flag | Meaning |
 |------|---------|
-| `--authorized` | **required** — assert written permission to test |
+| `--authorized` | optional — acknowledge written permission; silences the reminder |
 | `--scope` / `--scope-file` | declare in-scope hosts (strict matching) |
 | `--allow-private` | permit targets on private/reserved IPs |
 | `--paths` | also fetch benign discovery files |

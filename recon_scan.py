@@ -20,9 +20,8 @@ What it collects, per in-scope host:
 
 SCOPE IS ENFORCED. The tool will only contact hosts you explicitly place in
 scope (a hostname, or a *.example.com wildcard). A redirect that leaves scope is
-reported and NOT followed. You must pass --authorized to confirm you have
-written permission to test the targets; that assertion is yours to make and to
-be able to prove.
+reported and NOT followed. Authorization to test the targets is yours to hold
+and to be able to prove; --authorized is an optional acknowledgment of that.
 
 Stdlib only - no third-party packages required.
 
@@ -552,7 +551,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                    help="extra in-scope entry (hostname or *.domain); repeatable")
     p.add_argument("--scope-file", help="file of in-scope hosts, one per line (# comments ok)")
     p.add_argument("--authorized", action="store_true",
-                   help="REQUIRED: assert you have written permission to test these targets")
+                   help="acknowledge you have written permission to test these targets "
+                        "(optional; silences the reminder)")
     p.add_argument("--allow-private", action="store_true",
                    help="permit targets resolving to private/reserved IPs (internal engagements)")
     p.add_argument("--paths", action="store_true",
@@ -569,8 +569,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     specs, scope = load_scope(args)
     if not specs:
         p.error("no targets given")
-    if not args.authorized:
-        p.error("refusing to scan without --authorized (assert written permission to test)")
     for s in specs:
         if not scope.contains(s["host"]):
             p.error(f"target {s['label']!r} (host {s['host']!r}) is not in the "
@@ -581,6 +579,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         f"recon-scan {__version__}: {len(specs)} target(s), scope-guarded, "
         f"delay={args.delay}s. Recon only - no exploitation.\n"
     )
+    if not args.authorized:
+        sys.stderr.write(
+            "  reminder: only scan hosts you have written authorization to test.\n"
+        )
 
     limiter = RateLimiter(args.delay)
     results: List[Dict[str, Any]] = []
