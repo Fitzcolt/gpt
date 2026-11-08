@@ -39,8 +39,10 @@ import concurrent.futures
 import datetime as dt
 import ipaddress
 import json
+import random
 import socket
 import ssl
+import struct
 import sys
 import threading
 import time
@@ -369,6 +371,194 @@ def fingerprint(headers: List[Tuple[str, str]]) -> List[str]:
     return out
 
 
+# ----- Minimal DNS client (UDP + TCP fallback), stdlib only ---------------
+_QTYPE = {"A": 1, "NS": 2, "CNAME": 5, "SOA": 6, "MX": 15, "TXT": 16, "CAA": 257}
+# DKIM selectors are site-chosen and not discoverable; probe the common ones.
+_DKIM_SELECTORS = ("default", "google", "selector1", "selector2", "k1", "k2",
+                   "mail", "dkim", "s1", "s2", "mandrill", "mxvault", "zoho")
+
+
+def _system_resolver() -> str:
+    try:
+        with open("/etc/resolv.conf", "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("nameserver"):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        return parts[1].strip()
+    except OSError:
+        pass
+    return "1.1.1.1"
+
+
+def _encode_name(name: str) -> bytes:
+    out = b""
+    for label in name.rstrip(".").split("."):
+        b = label.encode("ascii", "ignore")
+        out += bytes([len(b)]) + b
+    return out + b"\x00"
+
+
+def _read_name(data: bytes, offset: int) -> Tuple[str, int]:
+    labels: List[str] = []
+    jumped = False
+    end = offset
+    safety = 0
+    while offset < len(data):
+        length = data[offset]
+        if length & 0xC0 == 0xC0:  # compression pointer
+            if not jumped:
+                end = offset + 2
+            offset = ((length & 0x3F) << 8) | data[offset + 1]
+            jumped = True
+            safety += 1
+            if safety > 128:
+                break
+            continue
+        offset += 1
+        if length == 0:
+            break
+        labels.append(data[offset:offset + length].decode("ascii", "replace"))
+        offset += length
+    return ".".join(labels), (end if jumped else offset)
+
+
+def _parse_txt(rdata: bytes) -> str:
+    i, parts = 0, []
+    while i < len(rdata):
+        n = rdata[i]
+        i += 1
+        parts.append(rdata[i:i + n].decode("ascii", "replace"))
+        i += n
+    return "".join(parts)
+
+
+def dns_query(name: str, qtype: str, resolver: str, timeout: float) -> List[str]:
+    """Return decoded RRs of the given type, or [] (also [] on any error)."""
+    qt = _QTYPE[qtype]
+    tid = random.randint(0, 0xFFFF)
+    header = struct.pack(">HHHHHH", tid, 0x0100, 1, 0, 0, 0)  # RD set
+    msg = header + _encode_name(name) + struct.pack(">HH", qt, 1)
+    try:
+        data = _dns_send_udp(msg, resolver, timeout)
+        if data and (struct.unpack(">H", data[2:4])[0] & 0x0200):  # TC: truncated
+            data = _dns_send_tcp(msg, resolver, timeout)
+    except OSError:
+        try:
+            data = _dns_send_tcp(msg, resolver, timeout)
+        except OSError:
+            return []
+    return _dns_parse_answers(data)
+
+
+def _dns_parse_answers(data: bytes) -> List[str]:
+    if not data or len(data) < 12:
+        return []
+    _, _, qd, an, _, _ = struct.unpack(">HHHHHH", data[:12])
+    offset = 12
+    for _ in range(qd):
+        _, offset = _read_name(data, offset)
+        offset += 4
+    out: List[str] = []
+    for _ in range(an):
+        _, offset = _read_name(data, offset)
+        if offset + 10 > len(data):
+            break
+        rtype, _rclass, _ttl, rdlen = struct.unpack(">HHIH", data[offset:offset + 10])
+        rstart = offset + 10
+        rdata = data[rstart:rstart + rdlen]
+        offset = rstart + rdlen
+        if rtype == 16:  # TXT
+            out.append(_parse_txt(rdata))
+        elif rtype == 15 and rdlen >= 3:  # MX
+            pref = struct.unpack(">H", rdata[:2])[0]
+            exch, _ = _read_name(data, rstart + 2)
+            out.append(f"{pref} {exch}")
+        elif rtype in (2, 5):  # NS, CNAME
+            nm, _ = _read_name(data, rstart)
+            out.append(nm)
+        elif rtype == 1 and rdlen == 4:  # A
+            out.append(".".join(str(b) for b in rdata))
+        elif rtype == 257 and rdlen >= 2:  # CAA
+            tl = rdata[1]
+            tag = rdata[2:2 + tl].decode("ascii", "replace")
+            val = rdata[2 + tl:].decode("ascii", "replace")
+            out.append(f'{rdata[0]} {tag} "{val}"')
+    return out
+
+
+def _dns_send_udp(msg: bytes, resolver: str, timeout: float) -> bytes:
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.settimeout(timeout)
+        s.sendto(msg, (resolver, 53))
+        return s.recvfrom(4096)[0]
+
+
+def _dns_send_tcp(msg: bytes, resolver: str, timeout: float) -> bytes:
+    with socket.create_connection((resolver, 53), timeout=timeout) as s:
+        s.sendall(struct.pack(">H", len(msg)) + msg)
+        hdr = s.recv(2)
+        if len(hdr) < 2:
+            return b""
+        want = struct.unpack(">H", hdr)[0]
+        buf = b""
+        while len(buf) < want:
+            chunk = s.recv(want - len(buf))
+            if not chunk:
+                break
+            buf += chunk
+        return buf
+
+
+def _spf_verdict(rec: str) -> str:
+    low = rec.lower()
+    qual = next((low[m - 1] for m in range(1, len(low))
+                 if low[m:m + 3] == "all" and low[m - 1] in "-~?+"), None)
+    return {"-": "hardfail -all (strong)", "~": "softfail ~all (acceptable)",
+            "?": "neutral ?all (weak)", "+": "pass +all (DANGEROUS: anyone may send)",
+            None: "no 'all' mechanism (incomplete)"}[qual]
+
+
+def _dmarc_verdict(rec: str) -> str:
+    kv = {}
+    for part in rec.split(";"):
+        if "=" in part:
+            k, v = part.split("=", 1)
+            kv[k.strip().lower()] = v.strip().lower()
+    p = kv.get("p", "")
+    pct = kv.get("pct", "100")
+    base = {"reject": "p=reject (strong)", "quarantine": "p=quarantine (enforced)",
+            "none": "p=none (MONITORING ONLY, not enforced)"}.get(p, f"p={p or 'missing'}")
+    return base + (f", pct={pct}" if pct != "100" else "") + (
+        "" if kv.get("rua") else ", no rua (no aggregate reports)")
+
+
+def email_posture(domain: str, resolver: str, timeout: float) -> Dict[str, Any]:
+    """Passive email-auth recon for a domain: MX, SPF, DMARC, DKIM, CAA."""
+    out: Dict[str, Any] = {"domain": domain, "resolver": resolver}
+    out["mx"] = dns_query(domain, "MX", resolver, timeout)
+
+    txt = dns_query(domain, "TXT", resolver, timeout)
+    spf = next((t for t in txt if t.lower().startswith("v=spf1")), None)
+    out["spf"] = {"record": spf, "verdict": _spf_verdict(spf) if spf
+                  else "MISSING (domain is spoofable)"}
+
+    dtxt = dns_query(f"_dmarc.{domain}", "TXT", resolver, timeout)
+    dmarc = next((t for t in dtxt if t.lower().startswith("v=dmarc1")), None)
+    out["dmarc"] = {"record": dmarc, "verdict": _dmarc_verdict(dmarc) if dmarc
+                    else "MISSING (no anti-spoofing policy)"}
+
+    dkim = []
+    for sel in _DKIM_SELECTORS:
+        rr = dns_query(f"{sel}._domainkey.{domain}", "TXT", resolver, timeout)
+        if any("v=dkim1" in r.lower() or "p=" in r.lower() for r in rr):
+            dkim.append(sel)
+    out["dkim_selectors"] = dkim  # best-effort; absence != no DKIM
+
+    out["caa"] = dns_query(domain, "CAA", resolver, timeout)
+    return out
+
+
 def scan_host(spec: Dict[str, Any], args: argparse.Namespace, scope: Scope,
               limiter: RateLimiter) -> Dict[str, Any]:
     host = spec["host"]
@@ -433,6 +623,12 @@ def scan_host(spec: Dict[str, Any], args: argparse.Namespace, scope: Scope,
             if r["status"] in (200, 204):
                 snippet = r["body"][:200].decode("utf-8", "replace").strip()
                 result["discovery"][p] = {"status": r["status"], "preview": snippet}
+
+    if args.dns and not dns_err:
+        # Email auth lives at the registrable domain; strip a leading 'www.'.
+        domain = host[4:] if host.startswith("www.") else host
+        resolver = args.resolver or _system_resolver()
+        result["email"] = email_posture(domain, resolver, args.timeout)
     return result
 
 
@@ -493,6 +689,21 @@ def print_report(results: List[Dict[str, Any]]) -> None:
             if r.get("discovery"):
                 for path, d in r["discovery"].items():
                     print(f"  found {path} ({d['status']})")
+            em = r.get("email")
+            if em:
+                print(f"  DNS/email ({em['domain']} via {em['resolver']}):")
+                mx = em.get("mx") or []
+                print(f"        MX: {', '.join(mx) if mx else 'none (no mail servers listed)'}")
+                print(f"        SPF: {em['spf']['verdict']}")
+                if em["spf"]["record"]:
+                    print(f"             {em['spf']['record']}")
+                print(f"        DMARC: {em['dmarc']['verdict']}")
+                if em["dmarc"]["record"]:
+                    print(f"             {em['dmarc']['record']}")
+                dk = em.get("dkim_selectors") or []
+                print(f"        DKIM: {'selector(s) ' + ', '.join(dk) if dk else 'no common selector found (selectors are site-specific)'}")
+                caa = em.get("caa") or []
+                print(f"        CAA: {', '.join(caa) if caa else 'none (any CA may issue certs for this domain)'}")
         print("=" * 78)
 
 
@@ -562,6 +773,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                    help="permit targets resolving to private/reserved IPs (internal engagements)")
     p.add_argument("--paths", action="store_true",
                    help="also fetch benign discovery files (robots.txt, security.txt, ...)")
+    p.add_argument("--dns", action="store_true",
+                   help="also check email-auth posture (MX, SPF, DMARC, DKIM, CAA) via DNS")
+    p.add_argument("--resolver", metavar="IP",
+                   help="DNS resolver to use (default: system resolver, else 1.1.1.1)")
     p.add_argument("--delay", type=float, default=0.5,
                    help="minimum seconds between requests, globally (default 0.5)")
     p.add_argument("--timeout", type=float, default=10.0, help="per-request timeout (default 10)")

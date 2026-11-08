@@ -16,6 +16,7 @@ separate, per-finding decision a human makes against an explicitly scoped target
 - Cookie flags: `Secure` / `HttpOnly` / `SameSite`
 - TLS: negotiated version, certificate subject/issuer/expiry/SANs, validity
 - Benign discovery files (`--paths`): `robots.txt`, `sitemap.xml`, `security.txt`, `humans.txt`
+- Email-auth posture (`--dns`): MX, SPF, DMARC, DKIM (common selectors), CAA — with a plain-language verdict on each (e.g. `p=none` = monitoring only, `+all` = dangerous)
 - Heuristic technology fingerprint from banners/cookies (Cloudflare, Vercel, ASP.NET, …)
 
 ## Safety model
@@ -48,6 +49,9 @@ python3 recon_scan.py --authorized --scope '*.example.com' www.example.com --del
 # Non-standard port, or a full URL
 python3 recon_scan.py --authorized staging.example.com:8443
 python3 recon_scan.py --authorized https://example.com/
+
+# Email-auth posture (SPF/DMARC/DKIM/MX/CAA) alongside the HTTP recon
+python3 recon_scan.py example.com --dns --paths --json report.json
 ```
 
 `scope.txt` is one entry per line; `#` comments allowed; `*.example.com` wildcards supported.
@@ -60,6 +64,8 @@ python3 recon_scan.py --authorized https://example.com/
 | `--scope` / `--scope-file` | declare in-scope hosts (strict matching) |
 | `--allow-private` | permit targets on private/reserved IPs |
 | `--paths` | also fetch benign discovery files |
+| `--dns` | also check email-auth posture (MX, SPF, DMARC, DKIM, CAA) |
+| `--resolver IP` | DNS resolver to use (default: system resolver, else 1.1.1.1) |
 | `--delay` | global min seconds between requests (default 0.5) |
 | `--timeout` | per-request timeout (default 10) |
 | `--max-redirects` | max redirect hops (default 5) |
